@@ -6,39 +6,83 @@ import yfinance as yf
 from datetime import datetime
 
 # ==========================================
-# 1. PAGE CONFIG & COMPACT TERMINAL STYLING
+# 1. PAGE CONFIG & BLOOMBERG-STYLE DARK UI
 # ==========================================
 st.set_page_config(
-    page_title="NSE/BSE Intelligence Command Center",
-    page_icon="📈",
+    page_title="NSE/BSE Pro Intelligence Terminal",
+    page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 1.2rem; padding-bottom: 1rem; max-width: 98%; }
+    /* Global Dark Theme */
+    .stApp { background-color: #0b0f19; color: #f1f5f9; }
+    .block-container { padding: 1.2rem 1.8rem 2rem 1.8rem; max-width: 100%; }
+    
+    /* Top Header Banner */
+    .top-banner {
+        background: linear-gradient(90deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+        border: 1px solid #334155;
+        border-radius: 10px;
+        padding: 14px 20px;
+        margin-bottom: 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .banner-title { font-size: 1.35rem; font-weight: 800; color: #38bdf8; letter-spacing: 0.5px; }
+    .banner-sub { font-size: 0.85rem; color: #94a3b8; }
+
+    /* KPI Cards */
     div[data-testid="stMetric"] {
+        background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+        border: 1px solid #1e293b;
+        border-top: 3px solid #3b82f6;
+        padding: 12px 16px;
+        border-radius: 10px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+    div[data-testid="stMetric"] label { color: #94a3b8 !important; font-size: 0.82rem !important; }
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] { color: #f8fafc !important; font-size: 1.45rem !important; }
+
+    /* Pro Panel Cards */
+    .pro-card {
         background-color: #111827;
         border: 1px solid #1f2937;
-        padding: 10px 14px;
-        border-radius: 8px;
+        border-radius: 12px;
+        padding: 16px 18px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+        height: 100%;
     }
-    .trade-box {
-        background-color: #111827;
-        border: 1px solid #374151;
-        border-radius: 8px;
-        padding: 14px;
-        margin-bottom: 10px;
+    .card-header {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #e2e8f0;
+        border-bottom: 1px solid #1f2937;
+        padding-bottom: 8px;
+        margin-bottom: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
     }
-    .badge-buy { background: #065f46; color: #a7f3d0; padding: 3px 8px; border-radius: 4px; font-weight: 700; }
-    .badge-hold { background: #1e40af; color: #bfdbfe; padding: 3px 8px; border-radius: 4px; font-weight: 700; }
-    .badge-exit { background: #991b1b; color: #fecaca; padding: 3px 8px; border-radius: 4px; font-weight: 700; }
+
+    /* Action Badges */
+    .badge-buy { background: #064e3b; color: #6ee7b7; border: 1px solid #10b981; padding: 4px 10px; border-radius: 6px; font-weight: 800; font-size: 0.85rem; }
+    .badge-acc { background: #1e3a8a; color: #93c5fd; border: 1px solid #3b82f6; padding: 4px 10px; border-radius: 6px; font-weight: 800; font-size: 0.85rem; }
+    .badge-hold { background: #312e81; color: #c7d2fe; border: 1px solid #6366f1; padding: 4px 10px; border-radius: 6px; font-weight: 800; font-size: 0.85rem; }
+    .badge-exit { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef4444; padding: 4px 10px; border-radius: 6px; font-weight: 800; font-size: 0.85rem; }
+
+    /* Progress Bars for Pillars */
+    .pillar-row { margin-bottom: 10px; }
+    .pillar-label { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 4px; color: #cbd5e1; }
+    .bar-bg { background: #1e293b; height: 8px; border-radius: 4px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 4px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. DEFAULT NSE/BSE DATASET
+# 2. DEFAULT NSE/BSE PORTFOLIO & WATCHLIST
 # ==========================================
 def get_default_data():
     data = [
@@ -76,22 +120,20 @@ def fetch_live_ltp(df):
     return df
 
 # ==========================================
-# 3. INTELLIGENT PARAMETER-WISE SCORING ENGINE
+# 3. INTELLIGENT PARAMETER SCORING ENGINE
 # ==========================================
 def score_stock_parameters(row, regime="Bull (VIX < 16)"):
     p = {}
-
-    # A. FUNDAMENTALS
     roce = row["ROCE"]
-    p["ROCE"] = 95 if roce >= 22 else (75 if roce >= 15 else (45 if roce >= 10 else 15))
+    p["ROCE Quality"] = 95 if roce >= 22 else (75 if roce >= 15 else (45 if roce >= 10 else 15))
 
     cfo = row["CFO_PAT"]
-    p["Cash Flow"] = 95 if cfo >= 0.85 else (65 if cfo >= 0.6 else (35 if cfo >= 0.4 else 10))
+    p["Cash Flow (CFO/PAT)"] = 95 if cfo >= 0.85 else (65 if cfo >= 0.6 else (35 if cfo >= 0.4 else 10))
 
     pg = row["Profit_Growth_YoY"]
     base_g = 85 if pg >= 25 else (70 if pg >= 15 else (45 if pg >= 5 else 15))
     accel_bonus = 15 if pg > row["Profit_CAGR_3Y"] and pg > 0 else 0
-    p["Earnings Growth"] = min(100, base_g + accel_bonus)
+    p["Earnings Accel"] = min(100, base_g + accel_bonus)
 
     peg = row["PEG"]
     p["Valuation (PEG)"] = 95 if 0 < peg <= 1.0 else (75 if peg <= 1.5 else (45 if peg <= 2.2 else 15))
@@ -104,10 +146,9 @@ def score_stock_parameters(row, regime="Bull (VIX < 16)"):
 
     fund_score = float(np.mean(list(p.values())))
 
-    # B. TECHNICALS
     t = {}
     ema_map = {"20>50>200": 98, "50>200": 75, "Above_200": 55, "Below_200": 15}
-    t["EMA Trend"] = ema_map.get(row["Price_vs_EMA"], 50)
+    t["EMA Alignment"] = ema_map.get(row["Price_vs_EMA"], 50)
 
     rsi = row["RSI"]
     if 55 <= rsi <= 68:
@@ -134,7 +175,6 @@ def score_stock_parameters(row, regime="Bull (VIX < 16)"):
 
     tech_score = float(np.mean(list(t.values())))
 
-    # C. RISK & LIQUIDITY
     rk = {}
     atr_pct = row["ATR_Pct"]
     rk["Volatility (ATR)"] = 92 if 1.5 <= atr_pct <= 3.0 else (70 if atr_pct < 1.5 or atr_pct <= 3.8 else 28)
@@ -149,11 +189,8 @@ def score_stock_parameters(row, regime="Bull (VIX < 16)"):
     rk["Liquidity & ASM"] = liq
 
     risk_score = float(np.mean(list(rk.values())))
-
-    # Combine all 12 parameters
     all_params = {**p, **t, **rk}
 
-    # D. DYNAMIC MARKET REGIME WEIGHTING
     if regime == "Bull (VIX < 16)":
         w_f, w_t, w_r = 0.35, 0.45, 0.20
     elif regime == "High Risk (VIX > 20)":
@@ -162,8 +199,6 @@ def score_stock_parameters(row, regime="Bull (VIX < 16)"):
         w_f, w_t, w_r = 0.40, 0.35, 0.25
 
     raw_master = (fund_score * w_f) + (tech_score * w_t) + (risk_score * w_r)
-
-    # E. CONFLUENCE BONUS & HARD RISK CIRCUIT-BREAKERS
     confluence_bonus = 5.0 if (fund_score >= 75 and tech_score >= 75 and risk_score >= 75) else 0.0
     master_score = min(100.0, raw_master + confluence_bonus)
 
@@ -171,14 +206,13 @@ def score_stock_parameters(row, regime="Bull (VIX < 16)"):
     if row["ASM_Stage"] > 0:
         veto_reasons.append(f"ASM Stage {int(row['ASM_Stage'])}")
     if row["Pledge_Pct"] > 25:
-        veto_reasons.append(f"High Pledge ({row['Pledge_Pct']}%)")
+        veto_reasons.append(f"Pledge {row['Pledge_Pct']}%")
     if row["Daily_Turnover_Cr"] < 1.0:
-        veto_reasons.append("Illiquid (<₹1Cr/day)")
+        veto_reasons.append("Low Liquidity")
 
     if veto_reasons:
         master_score = min(master_score, 45.0)
 
-    # F. RISKOMETER RATING (0-100)
     riskometer_val = min(100.0, max(5.0, (atr_pct * 10.0) + (dd * 0.7) + (max(0.0, row["Beta"] - 0.8) * 20.0) + (25.0 if veto_reasons else 0.0)))
 
     return {
@@ -201,53 +235,4 @@ def compute_trade_plan(row, scores, capital, risk_pct):
     max_risk_rupees = capital * (risk_pct / 100.0)
     rec_qty = int(max_risk_rupees // risk_per_share)
     max_qty_cap = int((capital * 0.20) // ltp) if ltp > 0 else 0
-    rec_qty = min(rec_qty, max_qty_cap)
-
-    target_1 = round(ltp + (3.0 * atr_val), 2)
-    target_2 = round(ltp + (5.0 * atr_val), 2)
-
-    qty_held = float(row["Qty"])
-    buy_avg = float(row["Buy_Avg"])
-    invested = qty_held * buy_avg
-    current_val = qty_held * ltp
-    pnl_rs = current_val - invested
-    pnl_pct = ((ltp - buy_avg) / buy_avg * 100.0) if buy_avg > 0 else 0.0
-
-    ms = scores["Master_Score"]
-    if qty_held > 0:
-        if ms < 55 or scores["Veto"] != "Clear" or ltp <= stop_loss:
-            action = "EXIT NOW"
-        elif ms >= 75:
-            action = f"HOLD (Trail SL ₹{stop_loss})"
-        else:
-            action = f"HOLD / TIGHTEN SL ₹{stop_loss}"
-    else:
-        if ms >= 80 and scores["Veto"] == "Clear":
-            action = "STRONG BUY"
-        elif ms >= 68 and scores["Veto"] == "Clear":
-            action = "ACCUMULATE (50%)"
-        else:
-            action = "AVOID / WATCH"
-
-    return {
-        "Entry_Zone": f"₹{round(ltp*0.99, 1)} - ₹{round(ltp*1.005, 1)}",
-        "Stop_Loss": stop_loss,
-        "Target_1": target_1,
-        "Target_2": target_2,
-        "Rec_Qty": rec_qty,
-        "Invested": round(invested, 2),
-        "Current_Val": round(current_val, 2),
-        "PnL_Rs": round(pnl_rs, 2),
-        "PnL_Pct": round(pnl_pct, 2),
-        "Action": action
-    }
-
-# ==========================================
-# 4. SIDEBAR CONTROLS
-# ==========================================
-with st.sidebar:
-    st.header("⚙️ Terminal Controls")
-    total_capital = st.number_input("Total Portfolio Capital (₹)", min_value=50000, value=1000000, step=50000)
-    risk_per_trade = st.slider("Max Risk Per Trade (%)", 0.5, 3.0, 1.0, 0.25)
-    market_regime = st.selectbox("Market Regime Overlay", ["Bull (VIX < 16)", "Neutral (VIX 16-20)", "High Risk (VIX > 20)"])
-    
+        

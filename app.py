@@ -12,12 +12,12 @@ st.set_page_config(
     page_title="NSE/BSE Intelligence Command Center",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 st.markdown("""
 <style>
-    .block-container { padding-top: 1rem; padding-bottom: 1rem; max-width: 98%; }
+    .block-container { padding-top: 1.2rem; padding-bottom: 1rem; max-width: 98%; }
     div[data-testid="stMetric"] {
         background-color: #111827;
         border: 1px solid #1f2937;
@@ -38,7 +38,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. DEFAULT NSE/BSE DATASET (SAMPLE + LIVE HOOK)
+# 2. DEFAULT NSE/BSE DATASET
 # ==========================================
 def get_default_data():
     data = [
@@ -60,7 +60,6 @@ def get_default_data():
     return pd.DataFrame(data, columns=cols)
 
 def fetch_live_ltp(df):
-    """Fetches live LTP from Yahoo Finance for NSE/BSE symbols."""
     updated_ltps = []
     for _, row in df.iterrows():
         suffix = ".NS" if str(row["Exchange"]).upper() == "NSE" else ".BO"
@@ -68,7 +67,7 @@ def fetch_live_ltp(df):
         try:
             hist = yf.Ticker(ticker).history(period="1d")
             if not hist.empty:
-                updated_ltps.append(round(float(hist["Close"].iloc[-1]), 2))
+                updated_ltps.append(round(float(hist["Close"].tail(1).item()), 2))
             else:
                 updated_ltps.append(row["LTP"])
         except Exception:
@@ -82,7 +81,7 @@ def fetch_live_ltp(df):
 def score_stock_parameters(row, regime="Bull (VIX < 16)"):
     p = {}
 
-    # --- A. FUNDAMENTAL PARAMETERS (0-100 each) ---
+    # A. FUNDAMENTALS
     roce = row["ROCE"]
     p["ROCE"] = 95 if roce >= 22 else (75 if roce >= 15 else (45 if roce >= 10 else 15))
 
@@ -103,53 +102,58 @@ def score_stock_parameters(row, regime="Bull (VIX < 16)"):
         bs_score -= min(40, row["Pledge_Pct"])
     p["Balance Sheet"] = max(5, bs_score)
 
-    fund_score = float(np.mean([p["ROCE"], p["Cash Flow"], p["Earnings Growth"], p["Valuation (PEG)"], p["Balance Sheet"]]))
+    fund_score = float(np.mean(list(p.values())))
 
-    # --- B. TECHNICAL PARAMETERS (0-100 each) ---
+    # B. TECHNICALS
+    t = {}
     ema_map = {"20>50>200": 98, "50>200": 75, "Above_200": 55, "Below_200": 15}
-    p["EMA Trend"] = ema_map.get(row["Price_vs_EMA"], 50)
+    t["EMA Trend"] = ema_map.get(row["Price_vs_EMA"], 50)
 
     rsi = row["RSI"]
     if 55 <= rsi <= 68:
-        p["RSI Momentum"] = 95
+        t["RSI Momentum"] = 95
     elif 48 <= rsi < 55 or 68 < rsi <= 75:
-        p["RSI Momentum"] = 75
+        t["RSI Momentum"] = 75
     elif rsi > 75:
-        p["RSI Momentum"] = 45
+        t["RSI Momentum"] = 45
     else:
-        p["RSI Momentum"] = 20
+        t["RSI Momentum"] = 20
 
     deliv, rvol = row["Delivery_Pct"], row["Rel_Vol"]
     if deliv >= 50 and rvol >= 1.5:
-        p["Delivery & Vol"] = 98
+        t["Delivery & Vol"] = 98
     elif deliv >= 40 and rvol >= 1.1:
-        p["Delivery & Vol"] = 75
+        t["Delivery & Vol"] = 75
     elif rvol >= 1.8 and deliv < 28:
-        p["Delivery & Vol"] = 30
+        t["Delivery & Vol"] = 30
     else:
-        p["Delivery & Vol"] = 45
+        t["Delivery & Vol"] = 45
 
     rs = row["RS_Nifty500"]
-    p["Rel Strength"] = 95 if rs >= 15 else (75 if rs >= 5 else (50 if rs >= 0 else 20))
+    t["Rel Strength"] = 95 if rs >= 15 else (75 if rs >= 5 else (50 if rs >= 0 else 20))
 
-    tech_score = float(np.mean([p["EMA Trend"], p["RSI Momentum"], p["Delivery & Vol"], p["Rel Strength"]]))
+    tech_score = float(np.mean(list(t.values())))
 
-    # --- C. RISK & LIQUIDITY PARAMETERS (0-100 each) ---
+    # C. RISK & LIQUIDITY
+    rk = {}
     atr_pct = row["ATR_Pct"]
-    p["Volatility (ATR)"] = 92 if 1.5 <= atr_pct <= 3.0 else (70 if atr_pct < 1.5 or atr_pct <= 3.8 else 28)
+    rk["Volatility (ATR)"] = 92 if 1.5 <= atr_pct <= 3.0 else (70 if atr_pct < 1.5 or atr_pct <= 3.8 else 28)
 
     dd = row["Max_DD_1Y"]
-    p["Drawdown Safety"] = 92 if dd <= 16 else (70 if dd <= 24 else (45 if dd <= 32 else 20))
+    rk["Drawdown Safety"] = 92 if dd <= 16 else (70 if dd <= 24 else (45 if dd <= 32 else 20))
 
     turn = row["Daily_Turnover_Cr"]
     liq = 95 if turn >= 10 else (65 if turn >= 2 else 15)
     if row["ASM_Stage"] > 0:
         liq = min(liq, 25)
-    p["Liquidity & ASM"] = liq
+    rk["Liquidity & ASM"] = liq
 
-    risk_score = float(np.mean([p["Volatility (ATR)"], p["Drawdown Safety"], p["Liquidity & ASM"]]))
+    risk_score = float(np.mean(list(rk.values())))
 
-    # --- D. DYNAMIC MARKET REGIME WEIGHTING ---
+    # Combine all 12 parameters
+    all_params = {**p, **t, **rk}
+
+    # D. DYNAMIC MARKET REGIME WEIGHTING
     if regime == "Bull (VIX < 16)":
         w_f, w_t, w_r = 0.35, 0.45, 0.20
     elif regime == "High Risk (VIX > 20)":
@@ -159,7 +163,7 @@ def score_stock_parameters(row, regime="Bull (VIX < 16)"):
 
     raw_master = (fund_score * w_f) + (tech_score * w_t) + (risk_score * w_r)
 
-    # --- E. CONFLUENCE BONUS & HARD RISK CIRCUIT-BREAKERS ---
+    # E. CONFLUENCE BONUS & HARD RISK CIRCUIT-BREAKERS
     confluence_bonus = 5.0 if (fund_score >= 75 and tech_score >= 75 and risk_score >= 75) else 0.0
     master_score = min(100.0, raw_master + confluence_bonus)
 
@@ -174,7 +178,7 @@ def score_stock_parameters(row, regime="Bull (VIX < 16)"):
     if veto_reasons:
         master_score = min(master_score, 45.0)
 
-    # --- F. RISKOMETER RATING (0-100 Risk Index) ---
+    # F. RISKOMETER RATING (0-100)
     riskometer_val = min(100.0, max(5.0, (atr_pct * 10.0) + (dd * 0.7) + (max(0.0, row["Beta"] - 0.8) * 20.0) + (25.0 if veto_reasons else 0.0)))
 
     return {
@@ -185,7 +189,7 @@ def score_stock_parameters(row, regime="Bull (VIX < 16)"):
         "Confluence": confluence_bonus,
         "Veto": ", ".join(veto_reasons) if veto_reasons else "Clear",
         "Riskometer": round(riskometer_val, 1),
-        "Param_Dict": p
+        "Param_Dict": all_params
     }
 
 def compute_trade_plan(row, scores, capital, risk_pct):
@@ -239,8 +243,11 @@ def compute_trade_plan(row, scores, capital, risk_pct):
     }
 
 # ==========================================
-# 4. SIDEBAR CONTROLS (DATA & RISK SETTINGS)
+# 4. SIDEBAR CONTROLS
 # ==========================================
 with st.sidebar:
     st.header("⚙️ Terminal Controls")
+    total_capital = st.number_input("Total Portfolio Capital (₹)", min_value=50000, value=1000000, step=50000)
+    risk_per_trade = st.slider("Max Risk Per Trade (%)", 0.5, 3.0, 1.0, 0.25)
+    market_regime = st.selectbox("Market Regime Overlay", ["Bull (VIX < 16)", "Neutral (VIX 16-20)", "High Risk (VIX > 20)"])
     
